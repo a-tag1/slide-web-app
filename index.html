@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Minimalist Media Player</title>
+
+  <!-- Swiper CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Swiper/11.0.5/swiper-bundle.min.css" />
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      outline: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background-color: #000000;
+      color: #ffffff;
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      font-weight: 300;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      width: 100vw;
+      overflow: hidden;
+    }
+
+    /* --- Header / Top Controls --- */
+    header {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      padding: 20px 24px;
+      z-index: 20;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0) 100%);
+      transition: opacity 0.4s ease;
+    }
+
+    .brand-title {
+      font-size: 0.85rem;
+      font-weight: 400;
+      text-transform: uppercase;
+      letter-spacing: 0.2rem;
+      color: #eeeeee;
+    }
+
+    /* --- Control Overlay (Bottom) --- */
+    .controls-overlay {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      padding: 24px;
+      padding-bottom: max(24px, env(safe-area-inset-bottom));
+      z-index: 20;
+      background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      transition: opacity 0.4s ease;
+    }
+
+    .controls-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      max-width: 950px;
+      flex-wrap: wrap;
+    }
+
+    /* Common UI Components */
+    .btn {
+      background: rgba(255, 255, 255, 0.08);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      padding: 8px 14px;
+      border-radius: 2px;
+      font-size: 0.75rem;
+      font-weight: 400;
+      text-transform: uppercase;
+      letter-spacing: 0.1rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+      backdrop-filter: blur(4px);
+    }
+
+    .btn:active {
+      background: #ffffff;
+      color: #000000;
+    }
+
+    .btn.active {
+      background: #ffffff;
+      color: #000000;
+      border-color: #ffffff;
+    }
+
+    .btn-icon-only {
+      padding: 8px 10px;
+    }
+
+    /* Select Dropdown styling */
+    .select-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    select {
+      background: rgba(255, 255, 255, 0.08);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      padding: 8px 12px;
+      border-radius: 2px;
+      font-size: 0.75rem;
+      font-weight: 400;
+      text-transform: uppercase;
+      letter-spacing: 0.1rem;
+      cursor: pointer;
+      backdrop-filter: blur(4px);
+      appearance: none;
+      padding-right: 24px;
+    }
+
+    .select-wrapper::after {
+      content: "▼";
+      font-size: 0.5rem;
+      position: absolute;
+      right: 8px;
+      color: rgba(255, 255, 255, 0.6);
+      pointer-events: none;
+    }
+
+    option {
+      background: #111111;
+      color: #ffffff;
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    /* --- Swiper Container --- */
+    .swiper-container-wrapper {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 1;
+    }
+
+    .swiper {
+      width: 100%;
+      height: 100%;
+    }
+
+    .swiper-slide {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background-color: #000000;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .swiper-slide img,
+    .swiper-slide video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      will-change: transform;
+    }
+
+    /* --- 再生中アニメーション (Motion Keyframes) --- */
+    @keyframes motion-zoom-in {
+      0% { transform: scale(1); }
+      100% { transform: scale(1.15); }
+    }
+    .motion-zoom-in img {
+      animation: motion-zoom-in var(--motion-duration, 5s) ease-out forwards;
+    }
+
+    @keyframes motion-zoom-out {
+      0% { transform: scale(1.15); }
+      100% { transform: scale(1); }
+    }
+    .motion-zoom-out img {
+      animation: motion-zoom-out var(--motion-duration, 5s) ease-out forwards;
+    }
+
+    @keyframes motion-pan {
+      0% { transform: scale(1.1) translateX(-3%); }
+      100% { transform: scale(1.1) translateX(3%); }
+    }
+    .motion-pan img {
+      animation: motion-pan var(--motion-duration, 5s) linear forwards;
+    }
+
+    @keyframes motion-kenburns {
+      0% { transform: scale(1) translate(0, 0); }
+      100% { transform: scale(1.18) translate(-2%, -2%); }
+    }
+    .motion-kenburns img {
+      animation: motion-kenburns var(--motion-duration, 5s) ease-out forwards;
+    }
+
+    /* Placeholder Text */
+    .placeholder-slide {
+      background-color: #000000;
+    }
+
+    .placeholder-text {
+      color: #444444;
+      font-size: 0.75rem;
+      text-align: center;
+      line-height: 2;
+      text-transform: uppercase;
+      letter-spacing: 0.15rem;
+    }
+
+    /* --- Swiper UI Customization --- */
+    .swiper-pagination-bullet {
+      background: #ffffff;
+      opacity: 0.2;
+    }
+    .swiper-pagination-bullet-active {
+      opacity: 0.9;
+      background: #ffffff;
+    }
+
+    .swiper-button-next,
+    .swiper-button-prev {
+      color: #ffffff;
+      opacity: 0.2;
+      transition: opacity 0.3s;
+    }
+    .swiper-button-next:after,
+    .swiper-button-prev:after {
+      font-size: 1.2rem;
+    }
+
+    .ui-hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header id="header">
+    <div class="brand-title">Media Player</div>
+    
+    <label class="btn">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      Add
+      <input type="file" id="media-input" accept="image/*,video/*" multiple>
+    </label>
+  </header>
+
+  <!-- Slide Canvas -->
+  <div class="swiper-container-wrapper">
+    <div class="swiper" id="my-swiper">
+      <div class="swiper-wrapper" id="swiper-wrapper">
+        <div class="swiper-slide placeholder-slide">
+          <p class="placeholder-text">
+            No media loaded.<br>
+            Tap [ Add ] to begin.
+          </p>
+        </div>
+      </div>
+      <div class="swiper-pagination"></div>
+      <div class="swiper-button-next"></div>
+      <div class="swiper-button-prev"></div>
+    </div>
+  </div>
+
+  <!-- Bottom Control Overlay -->
+  <div class="controls-overlay" id="controls-overlay">
+    <div class="controls-row">
+      <!-- 1. 前へコマ送り -->
+      <button class="btn btn-icon-only" id="prev-btn" title="Previous">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 20L9 12l10-8v16zM5 19V5"/></svg>
+      </button>
+
+      <!-- 2. 再生 / 一時停止 -->
+      <button class="btn" id="play-pause-btn">
+        <span id="play-icon">▶ PLAY</span>
+      </button>
+
+      <!-- 3. 次へコマ送り -->
+      <button class="btn btn-icon-only" id="next-btn" title="Next">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4l10 8-10 8V4zM19 5v14"/></svg>
+      </button>
+
+      <!-- 4. 再生順序 (Sequence / Random) -->
+      <button class="btn" id="shuffle-btn">
+        <span>ORDER: SEQ</span>
+      </button>
+
+      <!-- 5. 切替秒数設定 -->
+      <div class="select-wrapper">
+        <select id="interval-select">
+          <option value="2000">2S</option>
+          <option value="3000" selected>3S</option>
+          <option value="5000">5S</option>
+          <option value="10000">10S</option>
+        </select>
+      </div>
+
+      <!-- 6. 切替アニメーション (Transition) -->
+      <div class="select-wrapper">
+        <select id="effect-select" title="Transition Effect">
+          <option value="slide" selected>TR: SLIDE</option>
+          <option value="fade">TR: FADE</option>
+          <option value="cube">TR: CUBE</option>
+          <option value="coverflow">TR: COVERFLOW</option>
+          <option value="cards">TR: CARDS</option>
+          <option value="random">TR: RANDOM</option>
+        </select>
+      </div>
+
+      <!-- 7. 再生中アニメーション (Motion Effect) -->
+      <div class="select-wrapper">
+        <select id="motion-select" title="Motion Effect">
+          <option value="none" selected>MO: NONE</option>
+          <option value="zoom-in">MO: ZOOM IN</option>
+          <option value="zoom-out">MO: ZOOM OUT</option>
+          <option value="pan">MO: PAN</option>
+          <option value="kenburns">MO: KEN BURNS</option>
+          <option value="random">MO: RANDOM</option>
+        </select>
+      </div>
+
+      <!-- 8. フルスクリーン切り替え -->
+      <button class="btn btn-icon-only" id="fullscreen-btn" title="Fullscreen">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Swiper JS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Swiper/11.0.5/swiper-bundle.min.js"></script>
+
+  <script>
+    let isFirstAdd = true;
+    let isShuffle = false;
+    let autoHideTimer = null;
+    let isPlaying = false;
+
+    const availableTransitions = ['slide', 'fade', 'cube', 'coverflow', 'cards'];
+    const availableMotions = ['zoom-in', 'zoom-out', 'pan', 'kenburns'];
+
+    function getEffectiveTransition() {
+      const selected = document.getElementById('effect-select')?.value || 'slide';
+      if (selected === 'random') {
+        return availableTransitions[Math.floor(Math.random() * availableTransitions.length)];
+      }
+      return selected;
+    }
+
+    function getEffectiveMotion() {
+      const selected = document.getElementById('motion-select')?.value || 'none';
+      if (selected === 'random') {
+        return availableMotions[Math.floor(Math.random() * availableMotions.length)];
+      }
+      return selected;
+    }
+
+    // Swiperの初期化
+    let swiper = createSwiper(getEffectiveTransition());
+
+    function createSwiper(effectName) {
+      const currentDelay = parseInt(document.getElementById('interval-select')?.value || 3000, 10);
+
+      return new Swiper('#my-swiper', {
+        loop: false,
+        effect: effectName,
+        observer: true,
+        observeParents: true,
+        autoplay: {
+          delay: currentDelay,
+          disableOnInteraction: false,
+        },
+        pagination: {
+          el: '.swiper-pagination',
+          clickable: true,
+        },
+        navigation: {
+          nextEl: '.swiper-button-next',
+          prevEl: '.swiper-button-prev',
+        },
+        on: {
+          slideChangeTransitionStart: function () {
+            const effectSelectVal = document.getElementById('effect-select')?.value;
+            if (effectSelectVal === 'random') {
+              this.params.effect = availableTransitions[Math.floor(Math.random() * availableTransitions.length)];
+            }
+          },
+          slideChange: function () {
+            applyMotionEffect(this);
+
+            const allVideos = document.querySelectorAll('video');
+            if (allVideos.length > 0) {
+              allVideos.forEach(v => {
+                v.pause();
+                v.currentTime = 0;
+              });
+            }
+
+            if (!this.slides || this.slides.length === 0) return;
+            const currentSlide = this.slides[this.activeIndex];
+            if (!currentSlide) return;
+
+            const video = currentSlide.querySelector('video');
+
+            if (video) {
+              this.autoplay.stop();
+              video.play().catch(() => {});
+
+              video.onended = () => {
+                nextSlide();
+                if (isPlaying) {
+                  this.autoplay.start();
+                }
+              };
+            } else {
+              if (isPlaying && !this.autoplay.running) {
+                this.autoplay.start();
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function applyMotionEffect(swiperInstance) {
+      if (!swiperInstance.slides || swiperInstance.slides.length === 0) return;
+
+      const intervalMs = parseInt(document.getElementById('interval-select')?.value || 3000, 10);
+      document.documentElement.style.setProperty('--motion-duration', `${intervalMs / 1000}s`);
+
+      swiperInstance.slides.forEach(slide => {
+        slide.classList.remove('motion-zoom-in', 'motion-zoom-out', 'motion-pan', 'motion-kenburns');
+      });
+
+      const currentSlide = swiperInstance.slides[swiperInstance.activeIndex];
+      if (!currentSlide) return;
+
+      const motion = getEffectiveMotion();
+      if (motion !== 'none') {
+        const img = currentSlide.querySelector('img');
+        if (img) {
+          void currentSlide.offsetWidth;
+          currentSlide.classList.add(`motion-${motion}`);
+        }
+      }
+    }
+
+    swiper.autoplay.stop();
+
+    // --- DOM Elements ---
+    const playPauseBtn = document.getElementById('play-pause-btn');
+    const playIcon = document.getElementById('play-icon');
+    const prevBtn = document.getElementById('prev-btn');
+    const nextBtn = document.getElementById('next-btn');
+    const shuffleBtn = document.getElementById('shuffle-btn');
+    const intervalSelect = document.getElementById('interval-select');
+    const effectSelect = document.getElementById('effect-select');
+    const motionSelect = document.getElementById('motion-select');
+    const fullscreenBtn = document.getElementById('fullscreen-btn');
+    const header = document.getElementById('header');
+    const controlsOverlay = document.getElementById('controls-overlay');
+    const fileInput = document.getElementById('media-input');
+
+    // --- 送りロジック ---
+    function nextSlide() {
+      if (!swiper || !swiper.slides || swiper.slides.length === 0) return;
+
+      if (isShuffle) {
+        const total = swiper.slides.length;
+        const randomIdx = Math.floor(Math.random() * total);
+        swiper.slideTo(randomIdx);
+      } else {
+        if (swiper.isEnd) {
+          swiper.slideTo(0);
+        } else {
+          swiper.slideNext();
+        }
+      }
+    }
+
+    function prevSlide() {
+      if (!swiper || !swiper.slides || swiper.slides.length === 0) return;
+
+      if (swiper.isBeginning) {
+        swiper.slideTo(swiper.slides.length - 1);
+      } else {
+        swiper.slidePrev();
+      }
+    }
+
+    // --- 1. 再生 / 一時停止 ---
+    function togglePlay() {
+      if (isPlaying) {
+        swiper.autoplay.stop();
+        playIcon.textContent = '▶ PLAY';
+        playPauseBtn.classList.remove('active');
+        isPlaying = false;
+      } else {
+        swiper.autoplay.start();
+        playIcon.textContent = '❚❚ PAUSE';
+        playPauseBtn.classList.add('active');
+        isPlaying = true;
+        applyMotionEffect(swiper);
+      }
+    }
+
+    playPauseBtn.addEventListener('click', togglePlay);
+
+    // --- 2. 前後コマ送り ---
+    nextBtn.addEventListener('click', () => {
+      nextSlide();
+      resetAutoHide();
+    });
+
+    prevBtn.addEventListener('click', () => {
+      prevSlide();
+      resetAutoHide();
+    });
+
+    // --- 3. 再生順序 ---
+    shuffleBtn.addEventListener('click', () => {
+      isShuffle = !isShuffle;
+      if (isShuffle) {
+        shuffleBtn.querySelector('span').textContent = 'ORDER: RND';
+        shuffleBtn.classList.add('active');
+      } else {
+        shuffleBtn.querySelector('span').textContent = 'ORDER: SEQ';
+        shuffleBtn.classList.remove('active');
+      }
+    });
+
+    // --- 4. 切替秒数設定 ---
+    intervalSelect.addEventListener('change', () => {
+      const currentIdx = swiper.activeIndex || 0;
+      const currentEffect = getEffectiveTransition();
+      
+      swiper.destroy(true, true);
+      swiper = createSwiper(currentEffect);
+      
+      if (swiper.slides && swiper.slides.length >= 2) {
+        swiper.params.loop = true;
+      }
+      
+      swiper.update();
+      swiper.slideTo(currentIdx, 0);
+
+      if (isPlaying) {
+        swiper.autoplay.start();
+      } else {
+        swiper.autoplay.stop();
+      }
+      applyMotionEffect(swiper);
+    });
+
+    // --- 5. 切替アニメーション (TR) 変更 ---
+    effectSelect.addEventListener('change', () => {
+      const newEffect = getEffectiveTransition();
+      const currentIdx = swiper.activeIndex || 0;
+      
+      swiper.destroy(true, true);
+      swiper = createSwiper(newEffect);
+      
+      if (swiper.slides && swiper.slides.length >= 2) {
+        swiper.params.loop = true;
+      }
+      
+      swiper.update();
+      swiper.slideTo(currentIdx, 0);
+
+      if (isPlaying) {
+        swiper.autoplay.start();
+      } else {
+        swiper.autoplay.stop();
+      }
+      applyMotionEffect(swiper);
+    });
+
+    // --- 6. 再生中アニメーション (MO) 変更 ---
+    motionSelect.addEventListener('change', () => {
+      applyMotionEffect(swiper);
+    });
+
+    // --- 7. フルスクリーン & Auto Hide ---
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+        }
+      }
+    }
+
+    fullscreenBtn.addEventListener('click', toggleFullscreen);
+
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('.controls-overlay') || e.target.closest('header')) return;
+      
+      header.classList.toggle('ui-hidden');
+      controlsOverlay.classList.toggle('ui-hidden');
+      
+      if (!controlsOverlay.classList.contains('ui-hidden')) {
+        resetAutoHide();
+      }
+    });
+
+    function resetAutoHide() {
+      clearTimeout(autoHideTimer);
+      header.classList.remove('ui-hidden');
+      controlsOverlay.classList.remove('ui-hidden');
+      
+      if (isPlaying) {
+        autoHideTimer = setTimeout(() => {
+          header.classList.add('ui-hidden');
+          controlsOverlay.classList.add('ui-hidden');
+        }, 3000);
+      }
+    }
+
+    // --- ファイル追加処理 ---
+    fileInput.addEventListener('change', (e) => {
+      const files = e.target.files;
+      if (!files || files.length === 0) return;
+
+      if (isFirstAdd) {
+        swiper.removeAllSlides();
+        isFirstAdd = false;
+      }
+
+      const newSlides = [];
+
+      Array.from(files).forEach((file) => {
+        const fileUrl = URL.createObjectURL(file);
+        
+        let slideContent = '';
+        if (file.type.startsWith('video/')) {
+          slideContent = `<video src="${fileUrl}" controls muted playsinline></video>`;
+        } else {
+          slideContent = `<img src="${fileUrl}" alt="media">`;
+        }
+
+        newSlides.push(`<div class="swiper-slide">${slideContent}</div>`);
+      });
+
+      swiper.appendSlide(newSlides);
+      swiper.update();
+
+      if (swiper.slides && swiper.slides.length >= 2) {
+        swiper.params.loop = true;
+        swiper.update();
+      }
+
+      if (!isPlaying) {
+        togglePlay();
+      } else {
+        applyMotionEffect(swiper);
+      }
+    });
+  </script>
+</body>
+</html>
