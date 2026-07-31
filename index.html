@@ -701,7 +701,7 @@
         
         let slideContent = '';
         if (file.type.startsWith('video/')) {
-          slideContent = `<video data-src="${fileUrl}" controls muted playsinline></video>`;
+          slideContent = `<video data-src="${fileUrl}" muted playsinline></video>`;
         } else {
           slideContent = `<img data-src="${fileUrl}" decoding="async" alt="media">`;
         }
