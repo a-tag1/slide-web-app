@@ -183,7 +183,7 @@
     .swiper-slide video {
       width: 100%;
       height: 100%;
-      object-fit: contain;
+      object-fit: var(--media-fit, contain);
       will-change: transform;
     }
 
@@ -345,6 +345,14 @@
           <option value="pan">MO: PAN</option>
           <option value="kenburns">MO: KEN BURNS</option>
           <option value="random">MO: RANDOM</option>
+        </select>
+      </div>
+
+      <!-- 9. 表示フィット切り替え -->
+      <div class="select-wrapper">
+        <select id="fit-select" title="Display Fit">
+          <option value="contain" selected>FIT: CONTAIN</option>
+          <option value="cover">FIT: COVER</option>
         </select>
       </div>
 
@@ -521,6 +529,7 @@
     const intervalSelect = document.getElementById('interval-select');
     const effectSelect = document.getElementById('effect-select');
     const motionSelect = document.getElementById('motion-select');
+    const fitSelect = document.getElementById('fit-select');
     const fullscreenBtn = document.getElementById('fullscreen-btn');
     const header = document.getElementById('header');
     const controlsOverlay = document.getElementById('controls-overlay');
@@ -645,6 +654,11 @@
     // --- 6. 再生中アニメーション (MO) 変更 ---
     motionSelect.addEventListener('change', () => {
       applyMotionEffect(swiper);
+    });
+
+    // --- 7. 表示フィット切り替え ---
+    fitSelect.addEventListener('change', () => {
+      document.documentElement.style.setProperty('--media-fit', fitSelect.value);
     });
 
     // --- 7. フルスクリーン & Auto Hide ---
