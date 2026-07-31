@@ -414,30 +414,26 @@
             }
           },
           slideChange: function () {
+            if (!this.slides || this.slides.length === 0) return;
+            const currentSlide = this.slides[this.activeIndex];
+
+            // 現在スライド以外の動画を先に停止
+            document.querySelectorAll('video[src]').forEach(v => {
+              if (!currentSlide || !currentSlide.contains(v)) {
+                v.pause();
+                v.currentTime = 0;
+              }
+            });
+
             loadNearbySlides(this.activeIndex);
             applyMotionEffect(this);
 
-            document.querySelectorAll('video[src]').forEach(v => {
-              v.pause();
-              v.currentTime = 0;
-            });
-
-            if (!this.slides || this.slides.length === 0) return;
-            const currentSlide = this.slides[this.activeIndex];
             if (!currentSlide) return;
-
             const video = currentSlide.querySelector('video');
 
             if (video) {
               this.autoplay.stop();
-              video.play().catch(() => {});
-
-              video.onended = () => {
-                nextSlide();
-                if (isPlaying) {
-                  this.autoplay.start();
-                }
-              };
+              playVideoWhenReady(video, this);
             } else {
               if (isPlaying && !this.autoplay.running) {
                 this.autoplay.start();
@@ -451,6 +447,23 @@
     const PRELOAD_AHEAD = 2;  // 現在地から前後この枚数だけsrcをセット
     const UNLOAD_BEYOND = 5;   // この枚数以上離れたらsrcを除去してメモリ解放
 
+    // readyState >= 2(再生可能)なら即座に、未ロードなら canplay を待って再生
+    function playVideoWhenReady(video, swiperInstance) {
+      if (video.paused === false) return; // 既に再生中ならスキップ
+      const doPlay = () => {
+        video.play().catch(() => {});
+        video.onended = () => {
+          nextSlide();
+          if (isPlaying) swiperInstance.autoplay.start();
+        };
+      };
+      if (video.readyState >= 2) {
+        doPlay();
+      } else {
+        video.addEventListener('canplay', doPlay, { once: true });
+      }
+    }
+
     function loadNearbySlides(activeIndex) {
       if (!swiper || !swiper.slides || swiper.slides.length === 0) return;
       swiper.slides.forEach((slide, i) => {
@@ -463,7 +476,7 @@
         if (dist <= PRELOAD_AHEAD) {
           if (!loaded) {
             el.setAttribute('src', el.dataset.src);
-            if (video) video.load();
+            // setAttribute でロードは自動開始されるので video.load() は不要
           }
         } else if (dist > UNLOAD_BEYOND) {
           if (loaded) {
@@ -710,6 +723,14 @@
         togglePlay();
       } else {
         applyMotionEffect(swiper);
+      }
+
+      // 最初のスライドが動画の場合は slideChange が発火されないため手動で再生開始
+      const firstSlide = swiper.slides && swiper.slides[swiper.activeIndex];
+      const firstVideo = firstSlide && firstSlide.querySelector('video');
+      if (firstVideo) {
+        swiper.autoplay.stop();
+        playVideoWhenReady(firstVideo, swiper);
       }
     });
   </script>
