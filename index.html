@@ -414,15 +414,13 @@
             }
           },
           slideChange: function () {
+            loadNearbySlides(this.activeIndex);
             applyMotionEffect(this);
 
-            const allVideos = document.querySelectorAll('video');
-            if (allVideos.length > 0) {
-              allVideos.forEach(v => {
-                v.pause();
-                v.currentTime = 0;
-              });
-            }
+            document.querySelectorAll('video[src]').forEach(v => {
+              v.pause();
+              v.currentTime = 0;
+            });
 
             if (!this.slides || this.slides.length === 0) return;
             const currentSlide = this.slides[this.activeIndex];
@@ -445,6 +443,32 @@
                 this.autoplay.start();
               }
             }
+          }
+        }
+      });
+    }
+
+    const PRELOAD_AHEAD = 2;  // 現在地から前後この枚数だけsrcをセット
+    const UNLOAD_BEYOND = 5;   // この枚数以上離れたらsrcを除去してメモリ解放
+
+    function loadNearbySlides(activeIndex) {
+      if (!swiper || !swiper.slides || swiper.slides.length === 0) return;
+      swiper.slides.forEach((slide, i) => {
+        const img   = slide.querySelector('img[data-src]');
+        const video = slide.querySelector('video[data-src]');
+        const el    = img || video;
+        if (!el) return;
+        const dist   = Math.abs(i - activeIndex);
+        const loaded = el.getAttribute('src') === el.dataset.src;
+        if (dist <= PRELOAD_AHEAD) {
+          if (!loaded) {
+            el.setAttribute('src', el.dataset.src);
+            if (video) video.load();
+          }
+        } else if (dist > UNLOAD_BEYOND) {
+          if (loaded) {
+            if (video) { video.pause(); video.removeAttribute('src'); video.load(); }
+            else el.removeAttribute('src');
           }
         }
       });
@@ -578,6 +602,7 @@
         swiper.autoplay.stop();
       }
       applyMotionEffect(swiper);
+      loadNearbySlides(currentIdx);
     });
 
     // --- 5. 切替アニメーション (TR) 変更 ---
@@ -601,6 +626,7 @@
         swiper.autoplay.stop();
       }
       applyMotionEffect(swiper);
+      loadNearbySlides(currentIdx);
     });
 
     // --- 6. 再生中アニメーション (MO) 変更 ---
@@ -662,9 +688,9 @@
         
         let slideContent = '';
         if (file.type.startsWith('video/')) {
-          slideContent = `<video src="${fileUrl}" controls muted playsinline></video>`;
+          slideContent = `<video data-src="${fileUrl}" controls muted playsinline></video>`;
         } else {
-          slideContent = `<img src="${fileUrl}" alt="media">`;
+          slideContent = `<img data-src="${fileUrl}" decoding="async" alt="media">`;
         }
 
         newSlides.push(`<div class="swiper-slide">${slideContent}</div>`);
@@ -677,6 +703,8 @@
         swiper.params.loop = true;
         swiper.update();
       }
+
+      loadNearbySlides(swiper.activeIndex);
 
       if (!isPlaying) {
         togglePlay();
