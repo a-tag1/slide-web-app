@@ -482,17 +482,37 @@
 
     function playVideoWhenReady(video, swiperInstance) {
       if (video.paused === false) return;
+
+      // ★ iOS対策：JS側でも明示的に消音とインライン再生を強制設定する
+      video.muted = true;
+      video.defaultMuted = true;
+      video.playsInline = true;
+
       const doPlay = () => {
-        video.play().catch(() => {});
+        // play() のプロミスエラー（iOSのブロック）をキャッチして安全に処理
+        const playPromise = video.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(error => {
+            console.log("iOS Autoplay prevented:", error);
+            // 万が一再生がブロックされた場合は、動画の終端とみなして次のスライドへ進む救済措置
+            setTimeout(() => {
+              if (isPlaying) nextSlide();
+            }, 3000);
+          });
+        }
+
         video.onended = () => {
           nextSlide();
           if (isPlaying) swiperInstance.autoplay.start();
         };
       };
+
       if (video.readyState >= 2) {
         doPlay();
       } else {
         video.addEventListener('canplay', doPlay, { once: true });
+        // iOS用に読み込みを促す
+        video.load();
       }
     }
 
@@ -715,8 +735,10 @@
         const fileUrl = URL.createObjectURL(file);
         
         let slideContent = '';
+        // fileInput のイベントハンドラ内
         if (file.type.startsWith('video/')) {
-          slideContent = `<video data-src="${fileUrl}" muted playsinline></video>`;
+          // ★ iOS用に webkit-playsinline と muted を確実につける
+          slideContent = `<video data-src="${fileUrl}" muted playsinline webkit-playsinline preload="metadata"></video>`;
         } else {
           slideContent = `<img data-src="${fileUrl}" decoding="async" alt="media">`;
         }
