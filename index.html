@@ -5,8 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Minimalist Media Player</title>
 
+  <!-- ★ Webアプリ化（スタンドアロン表示）のためのメタタグ -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Media Player">
+
   <!-- Swiper CSS -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Swiper/11.0.5/swiper-bundle.min.css" />
+
+  <title>Minimalist Media Player</title>
 
   <style>
     * {
@@ -294,27 +301,22 @@
   <!-- Bottom Control Overlay -->
   <div class="controls-overlay" id="controls-overlay">
     <div class="controls-row">
-      <!-- 1. 前へコマ送り -->
       <button class="btn btn-icon-only" id="prev-btn" title="Previous">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 20L9 12l10-8v16zM5 19V5"/></svg>
       </button>
 
-      <!-- 2. 再生 / 一時停止 -->
       <button class="btn" id="play-pause-btn">
         <span id="play-icon">▶ PLAY</span>
       </button>
 
-      <!-- 3. 次へコマ送り -->
       <button class="btn btn-icon-only" id="next-btn" title="Next">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4l10 8-10 8V4zM19 5v14"/></svg>
       </button>
 
-      <!-- 4. 再生順序 (Sequence / Random) -->
       <button class="btn" id="shuffle-btn">
         <span>ORDER: SEQ</span>
       </button>
 
-      <!-- 5. 切替秒数設定 -->
       <div class="select-wrapper">
         <select id="interval-select">
           <option value="2000">2S</option>
@@ -324,7 +326,6 @@
         </select>
       </div>
 
-      <!-- 6. 切替アニメーション (Transition) -->
       <div class="select-wrapper">
         <select id="effect-select" title="Transition Effect">
           <option value="slide" selected>TR: SLIDE</option>
@@ -336,7 +337,6 @@
         </select>
       </div>
 
-      <!-- 7. 再生中アニメーション (Motion Effect) -->
       <div class="select-wrapper">
         <select id="motion-select" title="Motion Effect">
           <option value="none" selected>MO: NONE</option>
@@ -348,7 +348,6 @@
         </select>
       </div>
 
-      <!-- 9. 表示フィット切り替え -->
       <div class="select-wrapper">
         <select id="fit-select" title="Display Fit">
           <option value="contain" selected>FIT: CONTAIN</option>
@@ -356,7 +355,6 @@
         </select>
       </div>
 
-      <!-- 8. フルスクリーン切り替え -->
       <button class="btn btn-icon-only" id="fullscreen-btn" title="Fullscreen">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
       </button>
@@ -391,7 +389,6 @@
       return selected;
     }
 
-    // Swiperの初期化
     let swiper = createSwiper(getEffectiveTransition());
 
     function createSwiper(effectName) {
@@ -425,7 +422,7 @@
             if (!this.slides || this.slides.length === 0) return;
             const currentSlide = this.slides[this.activeIndex];
 
-            // 現在スライド以外の動画を先に停止
+            // 他の動画を停止
             document.querySelectorAll('video[src]').forEach(v => {
               if (!currentSlide || !currentSlide.contains(v)) {
                 v.pause();
@@ -433,7 +430,8 @@
               }
             });
 
-            loadNearbySlides(this.activeIndex);
+            // ★ 修正1：前後スライドの「デコード完了（描画準備）」を先行実行
+            preloadNearbySlides(this.activeIndex);
             applyMotionEffect(this);
 
             if (!currentSlide) return;
@@ -452,47 +450,77 @@
       });
     }
 
-    const PRELOAD_AHEAD = 2;  // 現在地から前後この枚数だけsrcをセット
-    const UNLOAD_BEYOND = 5;   // この枚数以上離れたらsrcを除去してメモリ解放
+    // ★ 修正2：プリロード＆デコード最適化（前後3枚まで強力に先行ロード）
+    const PRELOAD_RANGE = 3; 
 
-    // readyState >= 2(再生可能)なら即座に、未ロードなら canplay を待って再生
+    function preloadNearbySlides(activeIndex) {
+      if (!swiper || !swiper.slides || swiper.slides.length === 0) return;
+      
+      const total = swiper.slides.length;
+
+      for (let i = -PRELOAD_RANGE; i <= PRELOAD_RANGE; i++) {
+        let idx = activeIndex + i;
+        if (idx < 0) idx = total + idx;
+        if (idx >= total) idx = idx % total;
+
+        const slide = swiper.slides[idx];
+        if (!slide) continue;
+
+        const img = slide.querySelector('img[data-src]');
+        const video = slide.querySelector('video[data-src]');
+
+        if (img) {
+          const rawUrl = img.dataset.src;
+          if (!img.src) {
+            img.src = rawUrl; // DOMにセット
+          }
+          // ★ decode() でGPUへのレンダリング準備を完了させ、切り替え時の白画面を防ぐ
+          if (img.decode) {
+            img.decode().catch(() => {});
+          }
+        } else if (video) {
+          if (!video.src) {
+            video.src = video.dataset.src;
+            video.load(); // 動画のヘッダー情報を先行読み込み
+          }
+        }
+      }
+    }
+
     function playVideoWhenReady(video, swiperInstance) {
-      if (video.paused === false) return; // 既に再生中ならスキップ
+      if (video.paused === false) return;
+
+      // ★ iOS対策：JS側でも明示的に消音とインライン再生を強制設定する
+      video.muted = true;
+      video.defaultMuted = true;
+      video.playsInline = true;
+
       const doPlay = () => {
-        video.play().catch(() => {});
+        // play() のプロミスエラー（iOSのブロック）をキャッチして安全に処理
+        const playPromise = video.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(error => {
+            console.log("iOS Autoplay prevented:", error);
+            // 万が一再生がブロックされた場合は、動画の終端とみなして次のスライドへ進む救済措置
+            setTimeout(() => {
+              if (isPlaying) nextSlide();
+            }, 3000);
+          });
+        }
+
         video.onended = () => {
           nextSlide();
           if (isPlaying) swiperInstance.autoplay.start();
         };
       };
+
       if (video.readyState >= 2) {
         doPlay();
       } else {
         video.addEventListener('canplay', doPlay, { once: true });
+        // iOS用に読み込みを促す
+        video.load();
       }
-    }
-
-    function loadNearbySlides(activeIndex) {
-      if (!swiper || !swiper.slides || swiper.slides.length === 0) return;
-      swiper.slides.forEach((slide, i) => {
-        const img   = slide.querySelector('img[data-src]');
-        const video = slide.querySelector('video[data-src]');
-        const el    = img || video;
-        if (!el) return;
-        const dist   = Math.abs(i - activeIndex);
-        const loaded = el.getAttribute('src') === el.dataset.src;
-        if (dist <= PRELOAD_AHEAD) {
-          if (!loaded) {
-            el.setAttribute('src', el.dataset.src);
-            // setAttribute でロードは自動開始されるので video.load() は不要
-          }
-        } else if (dist > UNLOAD_BEYOND) {
-          if (loaded) {
-            if (video) { video.pause(); video.removeAttribute('src'); video.load(); }
-            else el.removeAttribute('src');
-          }
-        }
-      });
     }
 
     function applyMotionEffect(swiperInstance) {
@@ -624,7 +652,7 @@
         swiper.autoplay.stop();
       }
       applyMotionEffect(swiper);
-      loadNearbySlides(currentIdx);
+      preloadNearbySlides(currentIdx);
     });
 
     // --- 5. 切替アニメーション (TR) 変更 ---
@@ -648,7 +676,7 @@
         swiper.autoplay.stop();
       }
       applyMotionEffect(swiper);
-      loadNearbySlides(currentIdx);
+      preloadNearbySlides(currentIdx);
     });
 
     // --- 6. 再生中アニメーション (MO) 変更 ---
@@ -661,7 +689,7 @@
       document.documentElement.style.setProperty('--media-fit', fitSelect.value);
     });
 
-    // --- 7. フルスクリーン & Auto Hide ---
+    // --- 8. フルスクリーン & Auto Hide ---
     function toggleFullscreen() {
       if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen().catch(() => {});
@@ -714,8 +742,10 @@
         const fileUrl = URL.createObjectURL(file);
         
         let slideContent = '';
+        // fileInput のイベントハンドラ内
         if (file.type.startsWith('video/')) {
-          slideContent = `<video data-src="${fileUrl}" muted playsinline></video>`;
+          // ★ iOS用に webkit-playsinline と muted を確実につける
+          slideContent = `<video data-src="${fileUrl}" muted playsinline webkit-playsinline preload="metadata"></video>`;
         } else {
           slideContent = `<img data-src="${fileUrl}" decoding="async" alt="media">`;
         }
@@ -731,7 +761,8 @@
         swiper.update();
       }
 
-      loadNearbySlides(swiper.activeIndex);
+      // 読み込み直後に周囲スライドをデコード
+      preloadNearbySlides(swiper.activeIndex);
 
       if (!isPlaying) {
         togglePlay();
@@ -739,7 +770,6 @@
         applyMotionEffect(swiper);
       }
 
-      // 最初のスライドが動画の場合は slideChange が発火されないため手動で再生開始
       const firstSlide = swiper.slides && swiper.slides[swiper.activeIndex];
       const firstVideo = firstSlide && firstSlide.querySelector('video');
       if (firstVideo) {
