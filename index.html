@@ -59,6 +59,55 @@
       color: #eeeeee;
     }
 
+    .header-actions {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .info-button {
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      justify-content: center;
+      color: rgba(255, 255, 255, 0.72);
+    }
+
+    .release-info {
+      position: absolute;
+      top: calc(100% + 10px);
+      right: 0;
+      display: grid;
+      gap: 12px;
+      min-width: 176px;
+      padding: 14px 16px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      background: rgba(8, 8, 8, 0.94);
+      backdrop-filter: blur(10px);
+    }
+
+    .release-info[hidden] {
+      display: none;
+    }
+
+    .release-info-item {
+      display: grid;
+      gap: 4px;
+    }
+
+    .release-info-label {
+      color: rgba(255, 255, 255, 0.48);
+      font-size: 0.6rem;
+      letter-spacing: 0.12rem;
+    }
+
+    .release-info-value {
+      color: #eeeeee;
+      font-size: 0.75rem;
+      letter-spacing: 0.04rem;
+    }
+
     /* --- Control Overlay (Bottom) --- */
     .controls-overlay {
       position: absolute;
@@ -273,12 +322,27 @@
   <!-- Header -->
   <header id="header">
     <div class="brand-title">Media Player</div>
-    
-    <label class="btn">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-      Add
-      <input type="file" id="media-input" accept="image/*,video/*" multiple>
-    </label>
+
+    <div class="header-actions" id="header-actions">
+      <label class="btn">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        Add
+        <input type="file" id="media-input" accept="image/*,video/*" multiple>
+      </label>
+      <button class="btn info-button" id="info-button" type="button" title="About this app" aria-label="About this app" aria-controls="release-info" aria-expanded="false">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01" stroke-linecap="round"/></svg>
+      </button>
+      <div class="release-info" id="release-info" aria-label="App information" hidden>
+        <div class="release-info-item">
+          <span class="release-info-label">VERSION</span>
+          <span class="release-info-value">v1.0.1</span>
+        </div>
+        <div class="release-info-item">
+          <span class="release-info-label">UPDATED</span>
+          <span class="release-info-value">2026-10-08</span>
+        </div>
+      </div>
+    </div>
   </header>
 
   <!-- Slide Canvas -->
@@ -436,7 +500,7 @@
 
             if (video) {
               this.autoplay.stop();
-              playVideoWhenReady(video, this);
+              playVideoWhenReady(video);
             } else {
               if (isPlaying && !this.autoplay.running) {
                 this.autoplay.start();
@@ -482,17 +546,22 @@
       }
     }
 
-    function playVideoWhenReady(video, swiperInstance) {
+    function playVideoWhenReady(video) {
       if (video.paused === false) return;
 
       // ★ iOS対策：JS側でも明示的に消音とインライン再生を強制設定する
       video.muted = true;
       video.defaultMuted = true;
       video.playsInline = true;
+      video.preload = 'auto';
 
       const doPlay = () => {
         if (!video.isConnected || !video.closest('.swiper-slide')?.classList.contains('swiper-slide-active')) return;
         activeVideo = video;
+
+        video.onended = () => {
+          nextSlide();
+        };
 
         // play() のプロミスエラー（iOSのブロック）をキャッチして安全に処理
         const playPromise = video.play();
@@ -506,17 +575,9 @@
           });
         }
 
-        video.onended = () => {
-          nextSlide();
-          if (isPlaying) swiperInstance.autoplay.start();
-        };
       };
 
-      if (video.readyState >= 2) {
-        doPlay();
-      } else {
-        video.addEventListener('canplay', doPlay, { once: true });
-      }
+      doPlay();
     }
 
     function applyMotionEffect(swiperInstance) {
@@ -558,6 +619,8 @@
     const header = document.getElementById('header');
     const controlsOverlay = document.getElementById('controls-overlay');
     const fileInput = document.getElementById('media-input');
+    const infoButton = document.getElementById('info-button');
+    const releaseInfo = document.getElementById('release-info');
 
     // --- 送りロジック ---
     function nextSlide() {
@@ -698,6 +761,38 @@
 
     fullscreenBtn.addEventListener('click', toggleFullscreen);
 
+    function closeReleaseInfo() {
+      releaseInfo.hidden = true;
+      infoButton.setAttribute('aria-expanded', 'false');
+    }
+
+    infoButton.addEventListener('click', () => {
+      const isOpen = infoButton.getAttribute('aria-expanded') === 'true';
+      releaseInfo.hidden = isOpen;
+      infoButton.setAttribute('aria-expanded', String(!isOpen));
+
+      if (!isOpen) {
+        clearTimeout(autoHideTimer);
+        header.classList.remove('ui-hidden');
+        controlsOverlay.classList.remove('ui-hidden');
+      } else {
+        resetAutoHide();
+      }
+    });
+
+    document.addEventListener('click', (event) => {
+      if (!releaseInfo.hidden && !infoButton.parentElement.contains(event.target)) {
+        closeReleaseInfo();
+      }
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !releaseInfo.hidden) {
+        closeReleaseInfo();
+        resetAutoHide();
+      }
+    });
+
     document.addEventListener('click', (e) => {
       if (e.target.closest('.controls-overlay') || e.target.closest('header')) return;
       
@@ -716,6 +811,7 @@
       
       if (isPlaying) {
         autoHideTimer = setTimeout(() => {
+          closeReleaseInfo();
           header.classList.add('ui-hidden');
           controlsOverlay.classList.add('ui-hidden');
         }, 3000);
@@ -770,7 +866,7 @@
       const firstVideo = firstSlide && firstSlide.querySelector('video');
       if (firstVideo) {
         swiper.autoplay.stop();
-        playVideoWhenReady(firstVideo, swiper);
+        playVideoWhenReady(firstVideo);
       }
     });
   </script>
