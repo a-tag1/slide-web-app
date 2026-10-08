@@ -369,6 +369,7 @@
     let isShuffle = false;
     let autoHideTimer = null;
     let isPlaying = false;
+    let activeVideo = null;
 
     const availableTransitions = ['slide', 'fade', 'cube', 'coverflow', 'cards'];
     const availableMotions = ['zoom-in', 'zoom-out', 'pan', 'kenburns'];
@@ -397,8 +398,6 @@
       return new Swiper('#my-swiper', {
         loop: false,
         effect: effectName,
-        observer: true,
-        observeParents: true,
         autoplay: {
           delay: currentDelay,
           disableOnInteraction: false,
@@ -422,13 +421,11 @@
             if (!this.slides || this.slides.length === 0) return;
             const currentSlide = this.slides[this.activeIndex];
 
-            // 他の動画を停止
-            document.querySelectorAll('video[src]').forEach(v => {
-              if (!currentSlide || !currentSlide.contains(v)) {
-                v.pause();
-                v.currentTime = 0;
-              }
-            });
+            if (activeVideo) {
+              activeVideo.pause();
+              activeVideo.currentTime = 0;
+              activeVideo = null;
+            }
 
             // ★ 修正1：前後スライドの「デコード完了（描画準備）」を先行実行
             preloadNearbySlides(this.activeIndex);
@@ -450,8 +447,8 @@
       });
     }
 
-    // ★ 修正2：プリロード＆デコード最適化（前後3枚まで強力に先行ロード）
-    const PRELOAD_RANGE = 3; 
+    // 表示中のスライドと前後1枚を先読みする
+    const PRELOAD_RANGE = 1;
 
     function preloadNearbySlides(activeIndex) {
       if (!swiper || !swiper.slides || swiper.slides.length === 0) return;
@@ -470,18 +467,16 @@
         const video = slide.querySelector('video[data-src]');
 
         if (img) {
-          const rawUrl = img.dataset.src;
-          if (!img.src) {
-            img.src = rawUrl; // DOMにセット
-          }
-          // ★ decode() でGPUへのレンダリング準備を完了させ、切り替え時の白画面を防ぐ
-          if (img.decode) {
-            img.decode().catch(() => {});
+          if (!img.hasAttribute('src')) {
+            img.src = img.dataset.src;
+            if (img.decode) {
+              img.decode().catch(() => {});
+            }
           }
         } else if (video) {
-          if (!video.src) {
+          if (!video.hasAttribute('src')) {
             video.src = video.dataset.src;
-            video.load(); // 動画のヘッダー情報を先行読み込み
+            video.load();
           }
         }
       }
@@ -496,6 +491,9 @@
       video.playsInline = true;
 
       const doPlay = () => {
+        if (!video.isConnected || !video.closest('.swiper-slide')?.classList.contains('swiper-slide-active')) return;
+        activeVideo = video;
+
         // play() のプロミスエラー（iOSのブロック）をキャッチして安全に処理
         const playPromise = video.play();
         if (playPromise !== undefined) {
@@ -518,8 +516,6 @@
         doPlay();
       } else {
         video.addEventListener('canplay', doPlay, { once: true });
-        // iOS用に読み込みを促す
-        video.load();
       }
     }
 
