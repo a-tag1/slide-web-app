@@ -243,6 +243,28 @@
       will-change: transform;
     }
 
+    .playback-error {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      z-index: 10;
+      display: grid;
+      justify-items: center;
+      gap: 12px;
+      width: min(85vw, 280px);
+      padding: 18px;
+      transform: translate(-50%, -50%);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(8, 8, 8, 0.94);
+      color: #eeeeee;
+      text-align: center;
+      font-size: 0.8rem;
+    }
+
+    .playback-error[hidden] {
+      display: none;
+    }
+
     /* --- 再生中アニメーション (Motion Keyframes) --- */
     @keyframes motion-zoom-in {
       0% { transform: scale(1); }
@@ -356,6 +378,10 @@
           </p>
         </div>
       </div>
+      <div class="playback-error" id="playback-error" role="alert" hidden>
+        <p id="playback-error-message">Unable to play this video.</p>
+        <button class="btn" id="retry-video-btn" type="button">RETRY</button>
+      </div>
       <div class="swiper-pagination"></div>
       <div class="swiper-button-next"></div>
       <div class="swiper-button-prev"></div>
@@ -434,6 +460,8 @@
     let autoHideTimer = null;
     let isPlaying = false;
     let activeVideo = null;
+    let videoPlayGeneration = 0;
+    const mediaObjectUrls = new Set();
 
     const availableTransitions = ['slide', 'fade', 'cube', 'coverflow', 'cards'];
     const availableMotions = ['zoom-in', 'zoom-out', 'pan', 'kenburns'];
@@ -460,7 +488,7 @@
       const currentDelay = parseInt(document.getElementById('interval-select')?.value || 3000, 10);
 
       return new Swiper('#my-swiper', {
-        loop: false,
+        rewind: true,
         effect: effectName,
         autoplay: {
           delay: currentDelay,
@@ -482,36 +510,51 @@
             }
           },
           slideChange: function () {
-            if (!this.slides || this.slides.length === 0) return;
-            const currentSlide = this.slides[this.activeIndex];
-
-            if (activeVideo) {
-              activeVideo.pause();
-              activeVideo.currentTime = 0;
-              activeVideo = null;
-            }
-
-            // ★ 修正1：前後スライドの「デコード完了（描画準備）」を先行実行
-            preloadNearbySlides(this.activeIndex);
-            applyMotionEffect(this);
-
-            if (!currentSlide) return;
-            const video = currentSlide.querySelector('video');
-
-            if (video) {
-              this.autoplay.stop();
-              playVideoWhenReady(video);
-            } else {
-              if (isPlaying && !this.autoplay.running) {
-                this.autoplay.start();
-              }
-            }
+            handleActiveSlideChange(this);
           }
         }
       });
     }
 
-    // 表示中のスライドと前後1枚を先読みする
+    function handleActiveSlideChange(swiperInstance, resetVideo = true) {
+      if (!swiperInstance.slides || swiperInstance.slides.length === 0) return;
+
+      videoPlayGeneration++;
+      playbackError.hidden = true;
+
+      if (activeVideo) {
+        activeVideo.pause();
+        if (resetVideo) activeVideo.currentTime = 0;
+        activeVideo = null;
+      }
+
+      preloadNearbySlides(swiperInstance.activeIndex);
+      applyMotionEffect(swiperInstance);
+
+      const currentSlide = swiperInstance.slides[swiperInstance.activeIndex];
+      const video = currentSlide && currentSlide.querySelector('video');
+
+      if (video) {
+        swiperInstance.autoplay.stop();
+        if (isPlaying) playVideoWhenReady(video);
+      } else if (isPlaying) {
+        if (!swiperInstance.autoplay.running) swiperInstance.autoplay.start();
+      } else {
+        swiperInstance.autoplay.stop();
+      }
+    }
+
+    function recreateSwiper(effectName) {
+      const currentIndex = swiper.activeIndex || 0;
+
+      swiper.destroy(true, true);
+      swiper = createSwiper(effectName);
+      swiper.update();
+      swiper.slideTo(currentIndex, 0, false);
+      handleActiveSlideChange(swiper, false);
+    }
+
+    // 表示中と前後の画像を先読みする。動画は表示時にだけ読み込む。
     const PRELOAD_RANGE = 1;
 
     function preloadNearbySlides(activeIndex) {
@@ -528,7 +571,6 @@
         if (!slide) continue;
 
         const img = slide.querySelector('img[data-src]');
-        const video = slide.querySelector('video[data-src]');
 
         if (img) {
           if (!img.hasAttribute('src')) {
@@ -537,47 +579,87 @@
               img.decode().catch(() => {});
             }
           }
-        } else if (video) {
-          if (!video.hasAttribute('src')) {
-            video.src = video.dataset.src;
-            video.load();
-          }
         }
       }
     }
 
     function playVideoWhenReady(video) {
-      if (video.paused === false) return;
+      if (video.paused === false) {
+        activeVideo = video;
+        return;
+      }
 
-      // ★ iOS対策：JS側でも明示的に消音とインライン再生を強制設定する
       video.muted = true;
       video.defaultMuted = true;
       video.playsInline = true;
       video.preload = 'auto';
+      if (!video.hasAttribute('src') && video.dataset.src) {
+        video.src = video.dataset.src;
+        video.load();
+      }
+      activeVideo = video;
+      playbackError.hidden = true;
+      const generation = ++videoPlayGeneration;
 
-      const doPlay = () => {
+      const doPlay = async () => {
         if (!video.isConnected || !video.closest('.swiper-slide')?.classList.contains('swiper-slide-active')) return;
-        activeVideo = video;
 
         video.onended = () => {
           nextSlide();
         };
 
-        // play() のプロミスエラー（iOSのブロック）をキャッチして安全に処理
-        const playPromise = video.play();
-        if (playPromise !== undefined) {
-          playPromise.catch(error => {
-            console.log("iOS Autoplay prevented:", error);
-            // 万が一再生がブロックされた場合は、動画の終端とみなして次のスライドへ進む救済措置
-            setTimeout(() => {
-              if (isPlaying) nextSlide();
-            }, 3000);
-          });
-        }
+        try {
+          await waitForVideoReady(video);
 
+          if (generation !== videoPlayGeneration || !isActiveVideo(video)) return;
+          await video.play();
+          if (generation === videoPlayGeneration) playbackError.hidden = true;
+        } catch (error) {
+          if (generation === videoPlayGeneration) showPlaybackError(video, error);
+        }
       };
 
       doPlay();
+    }
+
+    function waitForVideoReady(video) {
+      if (video.error) return Promise.reject(video.error);
+      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return Promise.resolve();
+
+      return new Promise((resolve, reject) => {
+        let timeoutId;
+        const cleanup = () => {
+          clearTimeout(timeoutId);
+          video.removeEventListener('canplay', onCanPlay);
+          video.removeEventListener('error', onError);
+        };
+        const onCanPlay = () => {
+          cleanup();
+          resolve();
+        };
+        const onError = () => {
+          cleanup();
+          reject(video.error || new Error('Video failed to load'));
+        };
+
+        video.addEventListener('canplay', onCanPlay, { once: true });
+        video.addEventListener('error', onError, { once: true });
+        timeoutId = setTimeout(() => {
+          cleanup();
+          reject(new Error('Timed out waiting for video data'));
+        }, 10000);
+      });
+    }
+
+    function isActiveVideo(video) {
+      return video.isConnected && video === activeVideo &&
+        video.closest('.swiper-slide')?.classList.contains('swiper-slide-active');
+    }
+
+    function showPlaybackError(video, error) {
+      console.error('Video playback failed:', error, video.error);
+      if (!isActiveVideo(video)) return;
+      playbackError.hidden = false;
     }
 
     function applyMotionEffect(swiperInstance) {
@@ -621,21 +703,30 @@
     const fileInput = document.getElementById('media-input');
     const infoButton = document.getElementById('info-button');
     const releaseInfo = document.getElementById('release-info');
+    const playbackError = document.getElementById('playback-error');
+    const retryVideoBtn = document.getElementById('retry-video-btn');
 
     // --- 送りロジック ---
     function nextSlide() {
       if (!swiper || !swiper.slides || swiper.slides.length === 0) return;
 
-      if (isShuffle) {
-        const total = swiper.slides.length;
-        const randomIdx = Math.floor(Math.random() * total);
-        swiper.slideTo(randomIdx);
-      } else {
-        if (swiper.isEnd) {
-          swiper.slideTo(0);
-        } else {
-          swiper.slideNext();
+      const total = swiper.slides.length;
+      if (total === 1) {
+        const video = swiper.slides[swiper.activeIndex].querySelector('video');
+        if (video && isPlaying) {
+          video.currentTime = 0;
+          playVideoWhenReady(video);
         }
+        return;
+      }
+
+      if (isShuffle) {
+        const otherSlideIndexes = Array.from({ length: total }, (_, index) => index)
+          .filter(index => index !== swiper.activeIndex);
+        const randomIndex = otherSlideIndexes[Math.floor(Math.random() * otherSlideIndexes.length)];
+        swiper.slideTo(randomIndex);
+      } else {
+        swiper.slideNext();
       }
     }
 
@@ -653,19 +744,46 @@
     function togglePlay() {
       if (isPlaying) {
         swiper.autoplay.stop();
+        videoPlayGeneration++;
+        if (activeVideo) activeVideo.pause();
         playIcon.textContent = '▶ PLAY';
         playPauseBtn.classList.remove('active');
         isPlaying = false;
       } else {
-        swiper.autoplay.start();
         playIcon.textContent = '❚❚ PAUSE';
         playPauseBtn.classList.add('active');
         isPlaying = true;
         applyMotionEffect(swiper);
+
+        const currentSlide = swiper.slides[swiper.activeIndex];
+        const video = currentSlide && currentSlide.querySelector('video');
+        if (video) {
+          swiper.autoplay.stop();
+          playVideoWhenReady(video);
+        } else {
+          swiper.autoplay.start();
+        }
       }
     }
 
     playPauseBtn.addEventListener('click', togglePlay);
+
+    retryVideoBtn.addEventListener('click', () => {
+      const video = activeVideo;
+      if (!video || !isActiveVideo(video)) return;
+
+      const generation = ++videoPlayGeneration;
+      playbackError.hidden = true;
+      video.muted = true;
+      video.defaultMuted = true;
+      video.playsInline = true;
+
+      Promise.resolve(video.play()).then(() => {
+        if (generation === videoPlayGeneration) playbackError.hidden = true;
+      }).catch(error => {
+        if (generation === videoPlayGeneration) showPlaybackError(video, error);
+      });
+    });
 
     // --- 2. 前後コマ送り ---
     nextBtn.addEventListener('click', () => {
@@ -692,50 +810,14 @@
 
     // --- 4. 切替秒数設定 ---
     intervalSelect.addEventListener('change', () => {
-      const currentIdx = swiper.activeIndex || 0;
       const currentEffect = getEffectiveTransition();
-      
-      swiper.destroy(true, true);
-      swiper = createSwiper(currentEffect);
-      
-      if (swiper.slides && swiper.slides.length >= 2) {
-        swiper.params.loop = true;
-      }
-      
-      swiper.update();
-      swiper.slideTo(currentIdx, 0);
-
-      if (isPlaying) {
-        swiper.autoplay.start();
-      } else {
-        swiper.autoplay.stop();
-      }
-      applyMotionEffect(swiper);
-      preloadNearbySlides(currentIdx);
+      recreateSwiper(currentEffect);
     });
 
     // --- 5. 切替アニメーション (TR) 変更 ---
     effectSelect.addEventListener('change', () => {
       const newEffect = getEffectiveTransition();
-      const currentIdx = swiper.activeIndex || 0;
-      
-      swiper.destroy(true, true);
-      swiper = createSwiper(newEffect);
-      
-      if (swiper.slides && swiper.slides.length >= 2) {
-        swiper.params.loop = true;
-      }
-      
-      swiper.update();
-      swiper.slideTo(currentIdx, 0);
-
-      if (isPlaying) {
-        swiper.autoplay.start();
-      } else {
-        swiper.autoplay.stop();
-      }
-      applyMotionEffect(swiper);
-      preloadNearbySlides(currentIdx);
+      recreateSwiper(newEffect);
     });
 
     // --- 6. 再生中アニメーション (MO) 変更 ---
@@ -819,6 +901,12 @@
     }
 
     // --- ファイル追加処理 ---
+    window.addEventListener('pagehide', (event) => {
+      if (event.persisted) return;
+      mediaObjectUrls.forEach(url => URL.revokeObjectURL(url));
+      mediaObjectUrls.clear();
+    });
+
     fileInput.addEventListener('change', (e) => {
       const files = e.target.files;
       if (!files || files.length === 0) return;
@@ -832,6 +920,7 @@
 
       Array.from(files).forEach((file) => {
         const fileUrl = URL.createObjectURL(file);
+        mediaObjectUrls.add(fileUrl);
         
         let slideContent = '';
         // fileInput のイベントハンドラ内
@@ -848,11 +937,6 @@
       swiper.appendSlide(newSlides);
       swiper.update();
 
-      if (swiper.slides && swiper.slides.length >= 2) {
-        swiper.params.loop = true;
-        swiper.update();
-      }
-
       // 読み込み直後に周囲スライドをデコード
       preloadNearbySlides(swiper.activeIndex);
 
@@ -862,12 +946,6 @@
         applyMotionEffect(swiper);
       }
 
-      const firstSlide = swiper.slides && swiper.slides[swiper.activeIndex];
-      const firstVideo = firstSlide && firstSlide.querySelector('video');
-      if (firstVideo) {
-        swiper.autoplay.stop();
-        playVideoWhenReady(firstVideo);
-      }
     });
   </script>
 </body>
